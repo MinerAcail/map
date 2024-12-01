@@ -1,0 +1,1 @@
+zig build -Dosm_data=./gh.osm && python3 -m http.server 8011
