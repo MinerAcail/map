@@ -1,56 +1,43 @@
 class WasmHandler {
   constructor(gl) {
     this.gl = gl;
+    this.ebos = [];
     this.vaos = [];
     this.programs = [];
     this.uniform_locs = [];
     this.memory = null;
   }
 
-compileLinkProgram(vs, vs_len, fs, fs_len) {
-  const dec = new TextDecoder("utf8");
-  const vs_source = dec.decode(
-    new Uint8Array(this.memory.buffer, vs, vs_len)
-  );
-  const fs_source = dec.decode(
-    new Uint8Array(this.memory.buffer, fs, fs_len)
-  );
-
-  const vertexShader = loadShader(this.gl, this.gl.VERTEX_SHADER, vs_source);
-  const fragmentShader = loadShader(
-    this.gl,
-    this.gl.FRAGMENT_SHADER,
-    fs_source
-  );
-
-  // Add explicit null checks
-  if (!vertexShader || !fragmentShader) {
-    console.error("Shader compilation failed");
-    return -1; // Return an error indicator
-  }
-
-  const shaderProgram = this.gl.createProgram();
-  this.gl.attachShader(shaderProgram, vertexShader);
-  this.gl.attachShader(shaderProgram, fragmentShader);
-  this.gl.linkProgram(shaderProgram);
-  
-  if (!this.gl.getProgramParameter(shaderProgram, this.gl.LINK_STATUS)) {
-    console.error(
-      `Unable to initialize the shader program: ${this.gl.getProgramInfoLog(
-        shaderProgram
-      )}`
+  compileLinkProgram(vs, vs_len, fs, fs_len) {
+    const dec = new TextDecoder("utf8");
+    const vs_source = dec.decode(
+      new Uint8Array(this.memory.buffer, vs, vs_len),
     );
-    return -1; // Return an error indicator
-  }
+    const fs_source = dec.decode(
+      new Uint8Array(this.memory.buffer, fs, fs_len),
+    );
 
-  this.programs.push(shaderProgram);
-  return this.programs.length - 1;
-}
+    const vertexShader = loadShader(this.gl, this.gl.VERTEX_SHADER, vs_source);
+    const fragmentShader = loadShader(
+      this.gl,
+      this.gl.FRAGMENT_SHADER,
+      fs_source,
+    );
 
-  bind2DFloat32DataWasm(d, len) {
-    const arr = new Float32Array(this.memory.buffer, d, len);
-    vaos.push(bind2DFloat32Data(arr));
-    return vaos.length - 1;
+    const shaderProgram = this.gl.createProgram();
+    this.gl.attachShader(shaderProgram, vertexShader);
+    this.gl.attachShader(shaderProgram, fragmentShader);
+    this.gl.linkProgram(shaderProgram);
+    if (!this.gl.getProgramParameter(shaderProgram, this.gl.LINK_STATUS)) {
+      alert(
+        `Unable to initialize the shader program: ${this.gl.getProgramInfoLog(
+          shaderProgram,
+        )}`,
+      );
+    }
+
+    this.programs.push(shaderProgram);
+    return this.programs.length - 1;
   }
 
   bind2DFloat32Data(ptr, len) {
@@ -60,6 +47,19 @@ compileLinkProgram(vs, vs_len, fs, fs_len) {
     this.gl.bufferData(this.gl.ARRAY_BUFFER, positions, this.gl.STATIC_DRAW);
     this.gl.vertexAttribPointer(0, 2, this.gl.FLOAT, false, 0, 0);
     this.gl.enableVertexAttribArray(0);
+  }
+
+  bindEbo(ptr, len) {
+    const indices = new Uint32Array(this.memory.buffer, ptr, len);
+    const ebo = this.gl.createBuffer();
+    this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, ebo);
+    this.gl.bufferData(
+      this.gl.ELEMENT_ARRAY_BUFFER,
+      indices,
+      this.gl.STATIC_DRAW,
+    );
+    this.ebos.push(ebo);
+    return this.ebos.length - 1;
   }
 
   getUniformLocWasm(program, namep, name_len) {
@@ -118,11 +118,13 @@ async function instantiateWasmModule(wasm_handlers) {
       logWasm: wasm_handlers.logWasm.bind(wasm_handlers),
       compileLinkProgram: wasm_handlers.compileLinkProgram.bind(wasm_handlers),
       bind2DFloat32Data: wasm_handlers.bind2DFloat32Data.bind(wasm_handlers),
+      bindEbo: wasm_handlers.bindEbo.bind(wasm_handlers),
       glBindVertexArray: wasm_handlers.glBindVertexArray.bind(wasm_handlers),
       glClearColor: (...args) => wasm_handlers.gl.clearColor(...args),
       glClear: (...args) => wasm_handlers.gl.clear(...args),
       glUseProgram: wasm_handlers.glUseProgram.bind(wasm_handlers),
       glDrawArrays: (...args) => wasm_handlers.gl.drawArrays(...args),
+      glDrawElements: (...args) => wasm_handlers.gl.drawElements(...args),
       glGetUniformLoc: wasm_handlers.getUniformLocWasm.bind(wasm_handlers),
       glUniform1f: wasm_handlers.glUniform1f.bind(wasm_handlers),
     },
@@ -230,7 +232,8 @@ class CanvasInputHandler {
 }
 
 function makeGl(canvas) {
-  const gl = canvas.getContext("webgl") | canvas.getContext("webgl2");
+  // const gl = canvas.getContext("webgl2");
+  const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
 
   if (gl === null) {
     throw new Error("Failed to initialize gl context");
